@@ -4,6 +4,7 @@ import weave
 import asyncio
 from dotenv import load_dotenv
 from config import WEAVE_PROJECT
+from code_types import CodeFormatter
 
 load_dotenv()
 
@@ -13,9 +14,8 @@ weave.init(WEAVE_PROJECT)
 
 @weave.op()
 async def main():
-    # Initialize models
-    # code_executor = CodeExecutor()
-    # llm_judge = LLMJudge()
+
+    code_formatter = CodeFormatter()
 
     # Generate code
     prompt = """Create a simple Wordle game in Python using 3 functions:
@@ -38,10 +38,15 @@ async def main():
     del test_generator
     print(unit_tests)
 
+    code_formatter.write_to_temp_folder(
+        generated_code, program_runner, unit_tests)
+
     # Execute code
+    # code_executor = CodeExecutor()
     # execution_result = code_executor.execute(full_code)
 
     # # Evaluate code
+    # llm_judge = LLMJudge()
     # evaluation = llm_judge.evaluate(prompt, full_code, execution_result)
 
 if __name__ == "__main__":

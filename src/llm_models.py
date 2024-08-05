@@ -9,7 +9,7 @@ import weave
 import autopep8
 import isort
 from autoflake import fix_code
-from config import SEED
+from config import SEED, MAX_RETRIES
 
 
 class CodeGeneratorModel(Model):
@@ -20,7 +20,12 @@ class CodeGeneratorModel(Model):
 2. Optimize for O(n) time complexity or better where possible.
 3. Use list/dict comprehensions and generator expressions for concise data processing.
 4. Leverage `collections` module for efficient data structures (e.g., defaultdict, Counter).
-5. Use f-strings for string formatting."""
+5. Use f-strings for string formatting.
+6. Ensure all functions are properly defined and indented.
+7. Don't include any code outside of function definitions.
+8. Use meaningful variable names and add brief comments for clarity.
+9. Handle potential errors and edge cases.
+10. Follow PEP 8 style guidelines for consistent and readable code."""
 
     @weave.op()
     def predict(self, prompt: str) -> str:
@@ -38,7 +43,7 @@ class CodeGeneratorModel(Model):
                 {"role": "user", "content": prompt}
             ],
             response_model=GeneratedCode,
-            max_retries=10,
+            max_retries=MAX_RETRIES,
         )
         return response
 
@@ -90,7 +95,7 @@ class ProgramGeneratorModel(Model):
                 {"role": "user", "content": prompt}
             ],
             response_model=ProgramRunner,
-            max_retries=10,
+            max_retries=MAX_RETRIES,
         )
         return response
 
@@ -127,9 +132,13 @@ class UnitTestGenerator(Model):
         4. Uses pytest fixtures for setup and teardown if appropriate.
         5. Ensures the test is isolated and doesn't depend on the state of other tests.
         6. Uses meaningful test data that reflects real-world usage of the function.
+        7. Correctly patches any internal functions or methods used by the function being tested.
+        8. Uses the correct import path for the function being tested (e.g., 'from mypackage.code import function_name').
+        9. Avoids using 'module_name' in patch decorators, instead use the correct module path (e.g., 'mypackage.code').
+        10. Ensures that all necessary setup is done within the test function or fixture.
 
         The test should be in the format of a Python function named 'test_<function_name>'.
-        Include any necessary imports for the test function.
+        Include any necessary imports for the test function at the top of the file.
         """
     code_formatter: CodeFormatter = CodeFormatter()
 
@@ -209,6 +218,6 @@ class LLMJudge(Model):
                 {"role": "user", "content": evaluation_prompt}
             ],
             response_model=CodeEvaluation,
-            max_retries=10,
+            max_retries=MAX_RETRIES,
         )
         return response
