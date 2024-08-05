@@ -1,0 +1,6 @@
+weave
+groq
+instructor
+e2b_code_interpreter
+openai
+python-dotenv
