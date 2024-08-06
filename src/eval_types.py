@@ -29,32 +29,37 @@ class CodeEvaluation(BaseModel):
     """
     Represents a comprehensive evaluation of generated code.
 
-    This model includes evaluations for various aspects of code quality,
-    as well as an overall assessment.
+    This model includes evaluations for key aspects of code generation quality
+    based on academic research.
 
     Attributes:
-        correctness (EvaluationCriterion): Evaluation of the code's correctness.
-        efficiency (EvaluationCriterion): Evaluation of the code's efficiency.
-        readability (EvaluationCriterion): Evaluation of the code's readability.
-        error_handling (EvaluationCriterion): Evaluation of the code's error handling.
-        overall (EvaluationCriterion): Overall evaluation of the code.
+        functional_correctness (EvaluationCriterion): Evaluation of whether the code correctly solves the intended problem.
+        code_quality (EvaluationCriterion): Evaluation of code readability, efficiency, and adherence to best practices.
+        generalization (EvaluationCriterion): Evaluation of performance across different languages, tasks, and complexity levels.
+        consistency (EvaluationCriterion): Evaluation of output consistency for similar inputs.
+        error_handling (EvaluationCriterion): Evaluation of how well the code handles potential errors and edge cases.
+        overall (EvaluationCriterion): Overall evaluation of the code, considering all criteria.
     """
 
-    correctness: EvaluationCriterion = Field(
+    functional_correctness: EvaluationCriterion = Field(
         ...,
-        description="Evaluation of whether the code correctly implements the requested functionality"
+        description="Evaluation of whether the code correctly solves the intended problem"
     )
-    efficiency: EvaluationCriterion = Field(
+    code_quality: EvaluationCriterion = Field(
         ...,
-        description="Evaluation of whether the code is implemented efficiently"
+        description="Evaluation of code readability, efficiency, and adherence to best practices"
     )
-    readability: EvaluationCriterion = Field(
+    generalization: EvaluationCriterion = Field(
         ...,
-        description="Evaluation of whether the code is easy to read and understand"
+        description="Evaluation of performance across different languages, tasks, and complexity levels"
+    )
+    consistency: EvaluationCriterion = Field(
+        ...,
+        description="Evaluation of output consistency for similar inputs"
     )
     error_handling: EvaluationCriterion = Field(
         ...,
-        description="Evaluation of whether the code handles potential errors appropriately"
+        description="Evaluation of how well the code handles potential errors and edge cases"
     )
     overall: EvaluationCriterion = Field(
         ...,

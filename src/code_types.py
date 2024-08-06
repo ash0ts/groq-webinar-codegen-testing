@@ -1,3 +1,5 @@
+import importlib
+from typing import Set
 import black
 from pydantic import BaseModel, Field
 from typing import List
@@ -14,6 +16,9 @@ from typing import List
 from datetime import datetime
 import ast
 from pydantic import BaseModel, Field, model_validator
+import sys
+from stdlib_list import stdlib_list
+import re
 
 
 class GeneratedFunction(BaseModel):
@@ -24,8 +29,10 @@ class GeneratedFunction(BaseModel):
 
     @model_validator(mode='after')
     def validate_code_syntax(self) -> 'GeneratedFunction':
+        code_formatter = CodeFormatter()
+        formatted_code = code_formatter.lint_code(self.code)
         try:
-            tree = ast.parse(self.code)
+            tree = ast.parse(formatted_code)
         except SyntaxError as e:
             raise ValueError(f"Invalid Python syntax in code: {e}")
 
@@ -59,8 +66,18 @@ class ProgramRunner(BaseModel):
 
     main_function_code: str = Field(
         ..., description="The main code that orchestrates the execution of the generated functions.")
-    requirements: List[str] = Field(
-        ..., description="List of external package requirements that need to be pip installed.")
+
+    # @model_validator(mode='after')
+    # def validate_main_function_code(self) -> 'ProgramRunner':
+    #     code_formatter = CodeFormatter()
+    #     formatted_main_function_code = code_formatter.lint_code(
+    #         self.main_function_code)
+    #     try:
+    #         tree = ast.parse(formatted_main_function_code)
+    #     except SyntaxError as e:
+    #         raise ValueError(
+    #             f"Invalid Python syntax in main function code: {e}")
+    #     return self
 
 
 class UnitTest(BaseModel):
@@ -68,32 +85,38 @@ class UnitTest(BaseModel):
 
     function_name: str = Field(
         ..., description="The name of the function for which this unit test is designed. Should match the name of a GeneratedFunction.")
-    test_code: str = Field(..., description="The complete implementation of the unit test, including test setup, assertions, and any necessary imports or fixtures.")
+    test_code: str = Field(
+        ...,
+        description="The complete implementation of the unittest-style test class. Ensure this is not in a markdown code block and is valid Python code."
+    )
 
     @model_validator(mode='after')
     def validate_test_code(self) -> 'UnitTest':
+        code_formatter = CodeFormatter()
+
+        # Remove any leading/trailing whitespace and quotes
+        cleaned_code = self.test_code.strip().strip('"')
+
+        # Unescape any escaped characters
+        cleaned_code = cleaned_code.encode().decode('unicode_escape')
+
+        # Remove any triple-quote markers at the beginning and end
+        cleaned_code = re.sub(r'^"""|\n?"""$', '', cleaned_code)
+
+        formatted_test_code = code_formatter.lint_code(cleaned_code)
+
         # Syntax check
         try:
-            tree = ast.parse(self.test_code)
+            tree = ast.parse(formatted_test_code)
         except SyntaxError as e:
             raise ValueError(f"Invalid Python syntax in test code: {e}")
 
-        # Check if there's at least one function definition
-        functions = [node for node in ast.walk(
-            tree) if isinstance(node, ast.FunctionDef)]
-        if not functions:
-            raise ValueError("No function definition found in the code")
+        # Check if the code is empty after cleaning
+        if not formatted_test_code.strip():
+            raise ValueError(
+                "Test code is empty after removing triple-quoted blocks")
 
-        # Check for invalid top-level return statements
-        if any(isinstance(node, ast.Return) for node in tree.body):
-            raise ValueError("Invalid return statement outside of function")
-
-        # Check if there's at least one function definition starting with 'test_'
-        test_functions = [
-            func for func in functions if func.name.startswith('test_')]
-        if not test_functions:
-            raise ValueError("No test function definition found in the code")
-
+        self.test_code = formatted_test_code
         return self
 
 
@@ -101,6 +124,21 @@ class CodeFormatter(BaseModel):
 
     @weave.op()
     def lint_code(self, code: str) -> str:
+        # Replace escaped newlines with actual newlines
+        code = code.replace('\\n', '\n')
+
+        # Parse the code to get the AST
+        tree = ast.parse(code)
+
+        # Get the set of required imports
+        required_imports = self.get_required_imports(tree)
+
+        # Generate import statements
+        import_statements = self.generate_import_statements(required_imports)
+
+        # Prepend import statements to the code
+        code = import_statements + "\n\n" + code
+
         # Remove unused imports and variables
         code = fix_code(code, remove_all_unused_imports=True,
                         remove_unused_variables=True)
@@ -112,6 +150,35 @@ class CodeFormatter(BaseModel):
         code = autopep8.fix_code(code, options={'aggressive': 1})
 
         return code
+
+    def get_required_imports(self, tree: ast.AST) -> Set[tuple]:
+        required_imports = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Name):
+                if not self.is_builtin(node.id):
+                    required_imports.add((None, node.id))
+            elif isinstance(node, ast.ImportFrom):
+                if node.module:
+                    for alias in node.names:
+                        required_imports.add((node.module, alias.name))
+        return required_imports
+
+    def is_builtin(self, name: str) -> bool:
+        return name in dir(__builtins__)
+
+    def generate_import_statements(self, required_imports: Set[tuple]) -> str:
+        import_statements = []
+        for module, name in required_imports:
+            try:
+                if module:
+                    importlib.import_module(module)
+                    import_statements.append(f"from {module} import {name}")
+                else:
+                    importlib.import_module(name)
+                    import_statements.append(f"import {name}")
+            except ImportError:
+                pass  # If the module can't be imported, skip it
+        return "\n".join(import_statements)
 
     @weave.op()
     def format_functions(self, generated_code: GeneratedCode) -> str:
@@ -128,6 +195,26 @@ class CodeFormatter(BaseModel):
         main_function_code = program_runner.main_function_code
         formatted_full_code = f"{functions_context}\n\n{main_function_code}"
         return self.lint_code(formatted_full_code)
+
+    @weave.op()
+    def determine_requirements(self, main_code: str) -> List[str]:
+        requirements = set()
+        tree = ast.parse(main_code)
+
+        # Get the list of standard library modules for the current Python version
+        std_libs = set(stdlib_list(
+            f"{sys.version_info.major}.{sys.version_info.minor}"))
+
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                for alias in node.names:
+                    if alias.name not in std_libs:
+                        requirements.add(alias.name.split('.')[0])
+            elif isinstance(node, ast.ImportFrom):
+                if node.module and node.module.split('.')[0] not in std_libs:
+                    requirements.add(node.module.split('.')[0])
+
+        return sorted(list(requirements))
 
     @weave.op()
     def write_to_temp_folder(self, generated_code: GeneratedCode, program_runner: ProgramRunner, unit_tests: List[UnitTest]) -> str:
@@ -151,8 +238,9 @@ class CodeFormatter(BaseModel):
             "isort",
             "autoflake"
         ]
+        program_requirements = self.determine_requirements(main_code)
         all_requirements = list(
-            set(program_runner.requirements + additional_requirements))
+            set(program_requirements + additional_requirements))
         with open(os.path.join(base_dir, "requirements.txt"), "w") as f:
             f.write("\n".join(all_requirements))
 
@@ -256,3 +344,35 @@ def run_tests():
 if __name__ == "__main__":
     print(run_tests())
 '''
+
+    @weave.op()
+    def format_code_and_test_output(self, generated_code: GeneratedCode, program_runner: ProgramRunner, unit_tests: List[UnitTest], execution_result: dict) -> str:
+        formatted_code = self.format_full_code(generated_code, program_runner)
+
+        # Parse the test results
+        stdout = execution_result.get('stdout', '')
+        stderr = execution_result.get('stderr', '')
+
+        # Combine code, unit tests, and test results
+        output = "# Generated Code\n\n```python\n"
+        output += formatted_code
+        output += "\n```\n\n# Unit Tests\n\n"
+
+        for test in unit_tests:
+            output += f"## Test for {test.function_name}\n\n```python\n"
+            output += test.test_code
+            output += "\n```\n\n"
+
+        output += "# Test Results\n\n"
+
+        if stdout.strip() or stderr.strip():
+            output += "```\n"
+            if stdout.strip():
+                output += stdout.strip() + "\n\n"
+            if stderr.strip():
+                output += stderr.strip()
+            output += "\n```\n"
+        else:
+            output += "No test results available. The tests may not have been executed or the results were not captured.\n\n"
+
+        return output.strip()
